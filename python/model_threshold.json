@@ -1,0 +1,6 @@
+{
+  "ml_at_risk_proba_threshold": 0.55,
+  "training_rows": 100,
+  "target_column": "label_gt",
+  "oof_f1_at_threshold": 0.8444444444444444
+}
