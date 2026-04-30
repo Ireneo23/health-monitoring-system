@@ -5,3 +5,6 @@ python/**/*.pyc
 python/**/*.pyo
 python/**/*.bak
 python/tools/
+
+# Ignore tools folder
+tools/
