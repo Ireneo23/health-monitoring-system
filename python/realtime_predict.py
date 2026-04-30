@@ -1,3 +1,7 @@
+# Read BPM and temperature from the Arduino over the serial port.
+# Use the trained model and shared rules to decide normal vs at risk, then send that back to the board.
+# Opens the dashboard by default; add --cli for console-only mode.
+
 import argparse
 import os
 import sys
@@ -10,13 +14,30 @@ from typing import Any
 
 from rules import combined_at_risk
 
+# Exact bytes the Arduino expects (lowercase, no leading/trailing spaces, LF only).
+CMD_ARDUINO_NORMAL = b"normal\n"
+CMD_ARDUINO_AT_RISK = b"at risk\n"
+
+
+def _assert_strict_arduino_cmds() -> None:
+    for cmd in (CMD_ARDUINO_NORMAL, CMD_ARDUINO_AT_RISK):
+        assert cmd.endswith(b"\n"), cmd
+        line = cmd[:-1]
+        assert line == line.lower(), cmd
+        assert line == line.strip(), cmd
+        assert not line.startswith(b" "), cmd
+        assert not line.endswith(b" "), cmd
+
+
+_assert_strict_arduino_cmds()
+
 
 def _send_arduino_buzzer_status(ser: serial.Serial, final: int | None) -> None:
     """Send Python's final verdict: ML-based on plausible readings (rules.py); invalid -> buzzer off."""
     if final is None or final == 0:
-        ser.write(b"normal\n")
+        ser.write(CMD_ARDUINO_NORMAL)
     else:
-        ser.write(b"at risk\n")
+        ser.write(CMD_ARDUINO_AT_RISK)
     ser.flush()
 
 

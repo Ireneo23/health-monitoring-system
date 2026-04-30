@@ -1,3 +1,6 @@
+# Train a machine learning model on health_data.csv using BPM and temperature.
+# Tune a probability cutoff and save model.pkl plus model_threshold.json for live prediction.
+# Run this when you change your dataset and want a fresh model.
 """
 Train LogisticRegression on health_data.csv; tune ML probability threshold via OOF CV;
 save model.pkl and model_threshold.json for rules.py.

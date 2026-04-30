@@ -1,3 +1,6 @@
+# Print a quick quality report for health_data.csv: counts, duplicates, and label vs rule gaps.
+# Run from the python folder to inspect data before training without changing the file.
+# Helps catch messy labels or repeated samples early.
 """
 Audit script for health_data.csv: distributions, duplicates, rule vs label disagreement.
 

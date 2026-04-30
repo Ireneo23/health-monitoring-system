@@ -1,3 +1,6 @@
+# Rebuild and validate health_data.csv and fill derived columns from rules.py (label_rule, quality_flag).
+# Supports dry-run, full schema, or raw-only output and backs up the CSV before writing.
+# Does not invent fake rows—ground-truth labels should stay honest manual assessments.
 """
 Maintain health_data.csv: validate rows, compute label_rule / quality_flag, optional sort.
 

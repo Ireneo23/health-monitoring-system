@@ -1,3 +1,6 @@
+# Clean health_data.csv by removing duplicate sample IDs and keeping plausible rows only.
+# Use --dry-run to preview counts or --write to save the cleaned file (with a safety backup).
+# For full normalize and derived columns, use rebuild_health_data.py instead.
 """
 Optional CSV cleanup: keep plausible rows (quality_flag == 1) and dedupe by sample_id.
 

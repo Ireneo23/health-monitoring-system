@@ -1,3 +1,6 @@
+# Shared helpers for sensible sensor ranges, fixed threshold rules, and ML-based risk.
+# Loads the tuned probability cutoff from model_threshold.json after you run train_model.py.
+# Import this from other scripts so all parts of the project agree on the same logic.
 """
 Single source of truth for Normal vs At risk (Python).
 
@@ -15,10 +18,10 @@ from typing import Any, Optional
 import pandas as pd
 
 # Thresholds — same meaning as health_monitoring.ino (LCD / rule diagnostics only)
-BPM_AT_RISK_LOW = 59  # bpm at or below => at risk per rule
-BPM_AT_RISK_HIGH = 101  # bpm at or above => at risk per rule
-TEMP_AT_RISK_LOW = 35.9  # °C at or below => at risk (hypothermia)
-TEMP_AT_RISK_HIGH = 37.5  # °C at or above => at risk (fever)
+BPM_AT_RISK_LOW = 59  
+BPM_AT_RISK_HIGH = 101  
+TEMP_AT_RISK_LOW = 35.9 
+TEMP_AT_RISK_HIGH = 37.5  
 
 TEMP_VALID_MIN = 20.0
 TEMP_VALID_MAX = 45.0

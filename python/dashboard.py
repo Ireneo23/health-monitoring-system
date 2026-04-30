@@ -1,3 +1,6 @@
+# Desktop window that shows live BPM, temperature, and risk status from serial data.
+# Used together with realtime_predict.py while samples stream from the hardware.
+# Built with Tkinter for a simple student-friendly UI.
 """
 Tk health monitor UI for realtime_predict. (customtkinter could be swapped in later for
 rounder native widgets if you add a requirements.txt.)
