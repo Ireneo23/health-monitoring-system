@@ -4,7 +4,7 @@
 """
 Single source of truth for Normal vs At risk (Python).
 
-- Threshold constants match `health_monitoring.ino` for LCD / diagnostics (`is_at_risk_rule`).
+- Threshold constants are shared project defaults for LCD / diagnostics (`is_at_risk_rule`).
 - **Final realtime status on plausible readings** uses ML probability vs `model_threshold.json`
   (written by `train_model.py`). Implausible sensor values => no Normal/At risk (None).
 """
@@ -17,11 +17,12 @@ from typing import Any, Optional
 
 import pandas as pd
 
-# Thresholds — same meaning as health_monitoring.ino (LCD / rule diagnostics only)
-BPM_AT_RISK_LOW = 59  
-BPM_AT_RISK_HIGH = 101  
-TEMP_AT_RISK_LOW = 35.9 
-TEMP_AT_RISK_HIGH = 37.5  
+# Thresholds — LCD / rule diagnostics only (Arduino buzzer follows Python ML verdict).
+# BPM high: 106+ flags rule-at-risk so 101–105 BPM with normal temp can match label_gt=0 (exercise/stress without fever).
+BPM_AT_RISK_LOW = 59
+BPM_AT_RISK_HIGH = 106
+TEMP_AT_RISK_LOW = 35.9
+TEMP_AT_RISK_HIGH = 37.5
 
 TEMP_VALID_MIN = 20.0
 TEMP_VALID_MAX = 45.0
@@ -60,7 +61,7 @@ def is_plausible(bpm: float, temp: float) -> bool:
 
 
 def is_at_risk_rule(bpm: float, temp: float) -> bool:
-    """True if (bpm, temp) would be flagged by hardware-style thresholds — only when plausible."""
+    """True if fixed BPM/temp thresholds fire (BPM <=59 or >=106, temp <=35.9 or >=37.5) — only when plausible."""
     if not is_plausible(bpm, temp):
         return False
     if bpm <= BPM_AT_RISK_LOW:

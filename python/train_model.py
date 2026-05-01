@@ -2,20 +2,26 @@
 # Tune a probability cutoff and save model.pkl plus model_threshold.json for live prediction.
 # Run this when you change your dataset and want a fresh model.
 """
-Train LogisticRegression on health_data.csv; tune ML probability threshold via OOF CV;
+Train on health_data.csv: compare LogisticRegression + degree-2 PolynomialFeatures vs
+RandomForestClassifier; pick by OOF F1; tune ML probability threshold via OOF CV;
 save model.pkl and model_threshold.json for rules.py.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import PolynomialFeatures
 
 from rules import is_plausible
 
@@ -51,8 +57,8 @@ def _training_mask(df: pd.DataFrame) -> pd.Series:
     return df.apply(lambda r: is_plausible(float(r["bpm"]), float(r["temperature"])), axis=1)
 
 
-def _oof_best_threshold(model: LogisticRegression, X: pd.DataFrame, y: pd.Series, random_state: int) -> tuple[float, float]:
-    """Return (best_threshold, best_oof_f1)."""
+def _oof_best_threshold(model: Any, X: pd.DataFrame, y: pd.Series, random_state: int) -> tuple[float, float]:
+    """Return (best_threshold, best_oof_f1) for estimators with predict_proba."""
     n_splits = min(5, y.value_counts().min())
     n_splits = max(2, n_splits)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
@@ -70,6 +76,57 @@ def _oof_best_threshold(model: LogisticRegression, X: pd.DataFrame, y: pd.Series
     return best_t, best_f1
 
 
+def _make_logistic_poly() -> Pipeline:
+    return Pipeline(
+        [
+            ("poly", PolynomialFeatures(degree=2, include_bias=False)),
+            (
+                "clf",
+                LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42),
+            ),
+        ]
+    )
+
+
+def _make_random_forest() -> RandomForestClassifier:
+    return RandomForestClassifier(
+        n_estimators=200,
+        max_depth=4,
+        class_weight="balanced",
+        random_state=42,
+    )
+
+
+def _select_best_model(
+    X: pd.DataFrame, y: pd.Series, random_state: int
+) -> tuple[Any, str, float, float]:
+    """
+    Compare candidate estimators by OOF F1 at an OOF-tuned probability threshold.
+    Returns (best_unfitted_estimator, name, threshold, oof_f1).
+    """
+    candidates: list[tuple[str, Any]] = [
+        ("logistic_poly", _make_logistic_poly()),
+        ("random_forest", _make_random_forest()),
+    ]
+
+    best_name = ""
+    best_model: Any = None
+    best_thr = _DEFAULT_THRESHOLD
+    best_f1 = -1.0
+
+    for name, est in candidates:
+        thr, oof_f1 = _oof_best_threshold(clone(est), X, y, random_state=random_state)
+        print(f"  Candidate {name}: OOF F1 = {oof_f1:.4f}  (threshold ~{thr:.4f})")
+        if oof_f1 > best_f1:
+            best_f1 = oof_f1
+            best_thr = thr
+            best_name = name
+            best_model = est
+
+    assert best_model is not None
+    return best_model, best_name, best_thr, best_f1
+
+
 def main() -> None:
     data = _load_health_frame()
     y_col = _target_column(data)
@@ -84,19 +141,19 @@ def main() -> None:
     print(f"Training rows: {len(y)} (target={y_col}; features=bpm,temperature only; label_rule ignored)")
     print("Class counts:\n", y.value_counts().sort_index())
 
-    model = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42)
+    print("\nModel selection (higher OOF F1 wins):")
+    model, model_name, thr, oof_f1 = _select_best_model(X, y, random_state=42)
+    print(f"\nSelected: {model_name}")
+    print(f"OOF F1-optimal probability threshold (rough): {thr:.4f}  (OOF F1 score: {oof_f1:.4f})")
 
-    thr, oof_f1 = _oof_best_threshold(model, X, y, random_state=42)
-    print(f"\nOOF F1-optimal probability threshold (rough): {thr:.4f}  (OOF F1 score: {oof_f1:.4f})")
-
-    # Detailed CV reports
+    # Detailed CV reports (same splits as threshold tuning)
     n_splits = min(5, y.value_counts().min())
     n_splits = max(2, n_splits)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     fold = 0
     for train_i, test_i in skf.split(X, y):
         fold += 1
-        m = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42)
+        m = clone(model)
         X_tr, X_te = X.iloc[train_i], X.iloc[test_i]
         y_tr, y_te = y.iloc[train_i], y.iloc[test_i]
         m.fit(X_tr, y_tr)
@@ -115,6 +172,7 @@ def main() -> None:
         "training_rows": int(len(y)),
         "target_column": y_col,
         "oof_f1_at_threshold": float(oof_f1),
+        "selected_model": model_name,
     }
     _THRESHOLD_PATH.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 

@@ -1,23 +1,26 @@
-# Health dataset and ML
+# Python Folder Guide
 
-## `health_data.csv` columns
+This folder contains the Python side of the health monitoring project. It stores the training data, trained model, shared rules, live prediction script, and dashboard.
 
-| Column | Role |
-|--------|------|
-| `sample_id`, `bpm`, `temperature` | Raw measurements and row id |
-| `label_gt` | Ground-truth label (0 = Normal, 1 = At risk) — edit for real assessments |
-| `label` | Mirrors `label_gt` after `tools/rebuild_health_data.py` (full schema only) |
-| `label_rule` | **Derived** — threshold rule from [`rules.py`](rules.py); may disagree with `label_gt` |
-| `quality_flag` | **Derived** — plausible sensor range per [`rules.py`](rules.py) |
+## Main Files
 
-Training uses **`bpm` and `temperature` only** as features; `label_rule` is not used as a target or feature in [`train_model.py`](train_model.py).
+- `health_data.csv` - Dataset of BPM and temperature readings with labels for training and checking the model.
+- `train_model.py` - Trains the machine learning model using `health_data.csv`, then saves `model.pkl` and `model_threshold.json`.
+- `model.pkl` - Saved trained model used for live prediction.
+- `model_threshold.json` - Saved risk probability threshold and model training summary.
+- `rules.py` - Shared helper rules for valid sensor ranges, threshold checks, and final ML-based risk decisions.
+- `realtime_predict.py` - Reads Arduino serial data, predicts Normal or At risk, and sends the result back to the Arduino.
+- `dashboard.py` - Tkinter dashboard that shows live BPM, temperature, and risk status.
+- `README.md` - This guide.
 
-## Scripts
+## Tool Scripts
 
-From the `python/` folder:
+- `tools/audit_health_data.py` - Prints a report about the dataset, including labels, duplicates, and rule disagreements.
+- `tools/clean_health_data.py` - Optionally removes duplicate or invalid rows from `health_data.csv`.
+- `tools/rebuild_health_data.py` - Recomputes helper columns such as `label_rule` and `quality_flag`.
 
-- `python tools/rebuild_health_data.py` — normalize CSV, recompute derived columns (default **full** schema).
-- `python tools/rebuild_health_data.py --raw-only` — write only `sample_id,bpm,temperature,label_gt`.
-- `python tools/audit_health_data.py` — QA: balance, duplicates, label vs rule disagreement.
-- `python train_model.py` — train model, write `model.pkl` and `model_threshold.json`.
-- `python realtime_predict.py` — serial classify + Arduino buzzer feedback (`--cli` for console-only; default opens GUI via `dashboard.py`).
+## Typical Use
+
+1. Update or check `health_data.csv`.
+2. Run `python train_model.py` to refresh the model.
+3. Run `python realtime_predict.py` to use the Arduino and dashboard.
