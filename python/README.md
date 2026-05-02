@@ -13,12 +13,6 @@ This folder contains the Python side of the health monitoring project. It stores
 - `dashboard.py` - Tkinter dashboard that shows live BPM, temperature, and risk status.
 - `README.md` - This guide.
 
-## Tool Scripts
-
-- `tools/audit_health_data.py` - Prints a report about the dataset, including labels, duplicates, and rule disagreements.
-- `tools/clean_health_data.py` - Optionally removes duplicate or invalid rows from `health_data.csv`.
-- `tools/rebuild_health_data.py` - Recomputes helper columns such as `label_rule` and `quality_flag`.
-
 ## Typical Use
 
 1. Update or check `health_data.csv`.

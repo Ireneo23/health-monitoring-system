@@ -110,13 +110,14 @@ void loop()
     Serial.println(temp, 1);
   }
 
-  // Refresh LCD periodically (independent of beat detection).
+  // This selected block updates the LCD screen every 250 milliseconds.
+  //  Its purpose is to show the latest heart rate, risk status, and temperature
+  //  without refreshing the screen too fast.
   static unsigned long lastLcdMs = 0;
   const unsigned long now = millis();
   if (now - lastLcdMs >= 250)
   {
     lastLcdMs = now;
-
     // Row 0: HR + R/N from Python (buzzer follows same flag).
     lcd.setCursor(0, 0);
     lcd.print("HR:");
