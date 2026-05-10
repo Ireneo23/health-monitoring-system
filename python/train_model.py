@@ -34,6 +34,9 @@ _THRESHOLD_PATH = _DATA_DIR / "model_threshold.json"
 _DEFAULT_THRESHOLD = 0.5
 
 
+# This loads `health_data.csv` from disk as a pandas table for training.
+# It auto-detects Excel vs CSV by peeking at the file header bytes safely.
+
 def _load_health_frame() -> pd.DataFrame:
     if not _HEALTH_PATH.is_file():
         raise FileNotFoundError(_HEALTH_PATH)
@@ -44,11 +47,17 @@ def _load_health_frame() -> pd.DataFrame:
     return pd.read_csv(_HEALTH_PATH, encoding="utf-8-sig")
 
 
+# This picks which column holds the ground-truth zero-one labels.
+# Newer sheets prefer `label_gt` but older ones may still call it `label`.
+
 def _target_column(df: pd.DataFrame) -> str:
     if "label_gt" in df.columns:
         return "label_gt"
     return "label"
 
+
+# This builds a boolean mask of rows we trust enough to learn from.
+# It prefers an explicit quality flag column but otherwise mirrors live plausibility checks.
 
 def _training_mask(df: pd.DataFrame) -> pd.Series:
     """Prefer rows flagged plausible when quality_flag exists; else compute via rules.is_plausible."""
@@ -57,13 +66,30 @@ def _training_mask(df: pd.DataFrame) -> pd.Series:
     return df.apply(lambda r: is_plausible(float(r["bpm"]), float(r["temperature"])), axis=1)
 
 
+# This picks how many cross-validation folds fit the smallest class count.
+# Too few minority samples would break stratified splits so we cap sensibly.
+
+def _n_splits_for(y: pd.Series) -> int:
+    n_splits = min(5, y.value_counts().min())
+    return max(2, n_splits)
+
+
+# This pulls the “positive class” probability column from a proba matrix.
+# Binary models may expose one or two columns so we handle both shapes.
+
+def _proba_class1(proba: np.ndarray) -> np.ndarray:
+    return proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
+
+
+# This scans many cutoff scores on out-of-fold predictions to maximize F1.
+# It returns the best cutoff plus that cutoff’s cross-validated F1 score snapshot.
+
 def _oof_best_threshold(model: Any, X: pd.DataFrame, y: pd.Series, random_state: int) -> tuple[float, float]:
     """Return (best_threshold, best_oof_f1) for estimators with predict_proba."""
-    n_splits = min(5, y.value_counts().min())
-    n_splits = max(2, n_splits)
+    n_splits = _n_splits_for(y)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     proba = cross_val_predict(model, X, y, cv=skf, method="predict_proba")
-    p_risk = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
+    p_risk = _proba_class1(proba)
 
     best_t = _DEFAULT_THRESHOLD
     best_f1 = -1.0
@@ -75,6 +101,9 @@ def _oof_best_threshold(model: Any, X: pd.DataFrame, y: pd.Series, random_state:
             best_t = float(t)
     return best_t, best_f1
 
+
+# This builds a logistic regression on quadratic BPM-temperature feature pairs.
+# PolynomialFeatures expands inputs before the linear classifier sees them.
 
 def _make_logistic_poly() -> Pipeline:
     return Pipeline(
@@ -88,6 +117,9 @@ def _make_logistic_poly() -> Pipeline:
     )
 
 
+# This returns a shallow balanced random forest as the second candidate model.
+# Trees often capture mild curvature without hand-built feature expansions.
+
 def _make_random_forest() -> RandomForestClassifier:
     return RandomForestClassifier(
         n_estimators=200,
@@ -96,6 +128,9 @@ def _make_random_forest() -> RandomForestClassifier:
         random_state=42,
     )
 
+
+# This compares both estimators using the same threshold search recipe.
+# The winner is whichever pairing yields the highest out-of-fold F1 score.
 
 def _select_best_model(
     X: pd.DataFrame, y: pd.Series, random_state: int
@@ -127,6 +162,9 @@ def _select_best_model(
     return best_model, best_name, best_thr, best_f1
 
 
+# This is the script entry: filter data, train, print folds, then save artifacts.
+# Files written beside this script power realtime prediction and JSON thresholds.
+
 def main() -> None:
     data = _load_health_frame()
     y_col = _target_column(data)
@@ -147,8 +185,7 @@ def main() -> None:
     print(f"OOF F1-optimal probability threshold (rough): {thr:.4f}  (OOF F1 score: {oof_f1:.4f})")
 
     # Detailed CV reports (same splits as threshold tuning)
-    n_splits = min(5, y.value_counts().min())
-    n_splits = max(2, n_splits)
+    n_splits = _n_splits_for(y)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     fold = 0
     for train_i, test_i in skf.split(X, y):
@@ -158,7 +195,7 @@ def main() -> None:
         y_tr, y_te = y.iloc[train_i], y.iloc[test_i]
         m.fit(X_tr, y_tr)
         proba_te = m.predict_proba(X_te)
-        p_te = proba_te[:, 1] if proba_te.shape[1] > 1 else proba_te[:, 0]
+        p_te = _proba_class1(proba_te)
         y_hat = (p_te >= thr).astype(int)
         print(f"\n--- Fold {fold} (holdout {len(y_te)}) ---")
         print("Confusion [actual x pred]:\n", confusion_matrix(y_te, y_hat))

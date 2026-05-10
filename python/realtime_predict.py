@@ -14,10 +14,16 @@ from typing import Any
 
 from rules import combined_at_risk
 
+# bpm, temp, final (0/1 or None=invalid) — final follows ML on plausible rows; rule is diagnostic
+Payload = tuple[float, float, int | None, bool, int, float]
+
 # Exact bytes the Arduino expects (lowercase, no leading/trailing spaces, LF only).
 CMD_ARDUINO_NORMAL = b"normal\n"
 CMD_ARDUINO_AT_RISK = b"at risk\n"
 
+
+# This checks buzzer command bytes once at import time using asserts.
+# It helps catch typos or wrong spacing before anything writes to the board.
 
 def _assert_strict_arduino_cmds() -> None:
     for cmd in (CMD_ARDUINO_NORMAL, CMD_ARDUINO_AT_RISK):
@@ -32,7 +38,10 @@ def _assert_strict_arduino_cmds() -> None:
 _assert_strict_arduino_cmds()
 
 
-def _send_arduino_buzzer_status(ser: serial.Serial, final: int | None) -> None:
+# This sends the short text line the Arduino expects for buzzer on or off.
+# Normal or invalid readings map to the calm command; at-risk maps to alarm.
+
+def send_arduino_buzzer_status(ser: serial.Serial, final: int | None) -> None:
     """Send Python's final verdict: ML-based on plausible readings (rules.py); invalid -> buzzer off."""
     if final is None or final == 0:
         ser.write(CMD_ARDUINO_NORMAL)
@@ -41,16 +50,25 @@ def _send_arduino_buzzer_status(ser: serial.Serial, final: int | None) -> None:
     ser.flush()
 
 
+# This asks the OS for every USB serial device name right now.
+# Other helpers use it to print hints when picking or fixing the COM port.
+
 def _list_ports() -> list[Any]:
     return list(list_ports.comports())
 
 
-def _coerce_bpm_temp(v1: float, v2: float) -> tuple[float, float]:
+# This fixes older wires that sent temperature before BPM instead of BPM first.
+# When values clearly look like temp then pulse, it swaps them for the model.
+
+def coerce_bpm_temp(v1: float, v2: float) -> tuple[float, float]:
     """If line is temp,bpm (legacy), swap to bpm,temp for the model."""
     if 20.0 <= v1 <= 45.0 and 40.0 <= v2 <= 220.0:
         return v2, v1
     return v1, v2
 
+
+# This picks which COM port to open when you did not pass --port.
+# It exits with clear prints if no ports exist or several need a manual choice.
 
 def _resolve_port(explicit: str | None) -> str:
     ports = _list_ports()
@@ -74,6 +92,25 @@ def _resolve_port(explicit: str | None) -> str:
     sys.exit(1)
 
 
+# This reads one comma-separated line and scores BPM plus temperature together.
+# It tells the board the outcome and returns numbers for the UI or prints.
+
+def read_and_classify(ser: serial.Serial, model: Any) -> Payload | None:
+    """Read one line, parse ``bpm,temp``, classify, send buzzer command. Return None if unparseable."""
+    line = ser.readline().decode(errors="replace").strip()
+    try:
+        a, b = map(float, line.split(","))
+    except ValueError:
+        return None
+    bpm, temp = coerce_bpm_temp(a, b)
+    final, rule_risk, ml_label, p_risk = combined_at_risk(bpm, temp, model)
+    send_arduino_buzzer_status(ser, final)
+    return (bpm, temp, final, rule_risk, ml_label, p_risk)
+
+
+# This opens serial once and loops forever printing each classified sample.
+# Errors opening the port show nearby ports so you can fix wiring or drivers.
+
 def _cli_loop(port: str, baud: int, model: Any) -> None:
     try:
         ser = serial.Serial(port, baud, timeout=1)
@@ -90,15 +127,10 @@ def _cli_loop(port: str, baud: int, model: Any) -> None:
 
     try:
         while True:
-            line = ser.readline().decode(errors="replace").strip()
-            try:
-                a, b = map(float, line.split(","))
-            except ValueError:
+            item = read_and_classify(ser, model)
+            if item is None:
                 continue
-
-            bpm, temp = _coerce_bpm_temp(a, b)
-            final, rule_risk, ml_risk, p_risk = combined_at_risk(bpm, temp, model)
-            _send_arduino_buzzer_status(ser, final)
+            bpm, temp, final, rule_risk, ml_risk, p_risk = item
             rule_s = "At risk" if rule_risk else "OK"
             ml_s = "At risk" if ml_risk == 1 else "Normal"
             if final is None:
@@ -111,6 +143,9 @@ def _cli_loop(port: str, baud: int, model: Any) -> None:
         if ser.is_open:
             ser.close()
 
+
+# This parses command-line flags, loads the saved model, and starts work.
+# You either get the dashboard window or the print-only loop from --cli.
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Read BPM/temperature from serial and classify with the trained model.")

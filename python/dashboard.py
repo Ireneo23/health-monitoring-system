@@ -17,14 +17,12 @@ from typing import Any
 
 import serial
 
-from realtime_predict import _coerce_bpm_temp, _send_arduino_buzzer_status
-from rules import combined_at_risk
+from realtime_predict import Payload, read_and_classify
 
 # --- Serial worker ---------------------------------------------------------------------------
 
-# bpm, temp, final (0/1 or None=invalid) — final follows ML on plausible rows; rule_* is diagnostic
-Payload = tuple[float, float, int | None, bool, int, float]
-
+# This worker runs in the background and reads the USB port non-stop.
+# It turns each line into a labeled payload and pushes it into a small queue.
 
 def _serial_reader(
     port: str,
@@ -37,23 +35,18 @@ def _serial_reader(
     try:
         ser = serial.Serial(port, baud, timeout=1)
         while not stop.is_set():
-            line = ser.readline().decode(errors="replace").strip()
-            try:
-                a, b = map(float, line.split(","))
-            except ValueError:
+            item = read_and_classify(ser, model)
+            if item is None:
                 continue
-            bpm, temp = _coerce_bpm_temp(a, b)
-            final, rule_risk, ml_label, p_risk = combined_at_risk(bpm, temp, model)
-            _send_arduino_buzzer_status(ser, final)
             try:
-                out_q.put_nowait((bpm, temp, final, rule_risk, ml_label, p_risk))
+                out_q.put_nowait(item)
             except queue.Full:
                 try:
                     out_q.get_nowait()
                 except queue.Empty:
                     pass
                 try:
-                    out_q.put_nowait((bpm, temp, final, rule_risk, ml_label, p_risk))
+                    out_q.put_nowait(item)
                 except queue.Full:
                     pass
     finally:
@@ -67,6 +60,8 @@ POLL_MS = 40
 TRACE_LEN = 240
 CHART_H = 200
 
+# This starts the Tk window, wires the serial thread, and runs the UI loop.
+# Labels and the chart update from queued readings until you close the window.
 
 def run_dashboard(port: str, baud: int, model: Any) -> None:
     import tkinter as tk
@@ -164,9 +159,12 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
 
     trace_a: deque[float] = deque([0.0] * TRACE_LEN, maxlen=TRACE_LEN)
     trace_b: deque[float] = deque([0.0] * TRACE_LEN, maxlen=TRACE_LEN)
-    tick = [0]
-    bpm_f = [70.0]
-    smooth_b = [0.0]
+    tick = 0
+    bpm_f = 70.0
+    smooth_b = 0.0
+
+    # This runs when you click the window close button on the title bar.
+    # It stops the reader thread, waits briefly, then destroys the main window.
 
     def on_close() -> None:
         stop.set()
@@ -175,7 +173,11 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
+    # This timer callback drains new readings and refreshes text and colors.
+    # It also advances fake waveform points so the mini charts keep moving.
+
     def poll() -> None:
+        nonlocal tick, bpm_f, smooth_b
         if not stop.is_set():
             root.after(POLL_MS, poll)
 
@@ -185,7 +187,7 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
             except queue.Empty:
                 break
             b, t, p_final, rule_risk, ml_label, p_risk = item
-            bpm_f[0] = b
+            bpm_f = b
             bpm_num.config(text=str(int(round(b))))
             temp_num.config(text=f"{t:.1f} °C")
             rule_txt = "At risk" if rule_risk else "OK"
@@ -202,16 +204,16 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
             else:
                 badge.config(text="  At risk  ", bg="#F5B8B8", fg="#5c0a0a")
 
-        bpm = max(40.0, min(220.0, bpm_f[0]))
-        tick[0] += 1
-        t0 = tick[0]
+        bpm = max(40.0, min(220.0, bpm_f))
+        tick += 1
+        t0 = tick
         samples_per_min = 60000.0 / POLL_MS
         frames_per_beat = max(3.0, samples_per_min / bpm)
         spike = (t0 % int(frames_per_beat)) == 0
         noise = random.uniform(-0.06, 0.06)
         a_y = noise + (0.82 if spike else 0.0)
-        smooth_b[0] = 0.75 * smooth_b[0] + 0.25 * a_y
-        b_y = smooth_b[0] * 0.55 + 0.08 * math.sin(t0 * 0.11)
+        smooth_b = 0.75 * smooth_b + 0.25 * a_y
+        b_y = smooth_b * 0.55 + 0.08 * math.sin(t0 * 0.11)
         trace_a.append(a_y)
         trace_b.append(b_y)
 
@@ -233,6 +235,9 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
         mid_y = (graph_top + graph_bot) / 2
         h_span = (graph_bot - graph_top) / 2.0 - 4
 
+        # This draws one polyline on the canvas from a history list of heights.
+        # Height is scaled by amp so two traces can sit above or below center.
+
         def line_from_deque(d: deque[float], y_offset: float, amp: float) -> None:
             pts: list[tuple[int, int]] = []
             n = len(d)
@@ -251,7 +256,7 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
 
         cv.create_line(x_scrub, graph_top, x_scrub, graph_bot, fill=fg_dark, width=1, dash=(4, 4))
 
-        raw_bpm = bpm_f[0]
+        raw_bpm = bpm_f
         if math.isfinite(raw_bpm):
             tip = f"{int(round(raw_bpm))} bpm"
         else:

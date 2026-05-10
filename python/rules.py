@@ -35,7 +35,11 @@ ML_AT_RISK_PROBA_THRESHOLD = 0.55
 _THRESHOLD_JSON = Path(__file__).resolve().parent / "model_threshold.json"
 
 
-def _deployed_ml_threshold() -> float:
+# This reads the saved cutoff number from JSON if the file exists on disk.
+# If the file is missing or broken it quietly falls back to the default constant.
+
+def ml_at_risk_proba_cutoff() -> float:
+    """Probability threshold written by train_model.py after OOF tuning."""
     if _THRESHOLD_JSON.is_file():
         try:
             data = json.loads(_THRESHOLD_JSON.read_text(encoding="utf-8"))
@@ -45,10 +49,8 @@ def _deployed_ml_threshold() -> float:
     return ML_AT_RISK_PROBA_THRESHOLD
 
 
-def ml_at_risk_proba_cutoff() -> float:
-    """Probability threshold written by train_model.py after OOF tuning."""
-    return _deployed_ml_threshold()
-
+# This returns true only when BPM and temperature sit inside sane hardware ranges.
+# Bad numbers like infinity or impossible temps should fail this quick sanity gate.
 
 def is_plausible(bpm: float, temp: float) -> bool:
     """Sensor ranges — matches Arduino TEMP_VALID and typical pulse range."""
@@ -59,6 +61,9 @@ def is_plausible(bpm: float, temp: float) -> bool:
         and BPM_VALID_MIN <= bpm <= BPM_VALID_MAX
     )
 
+
+# This applies simple high-low cutoffs for pulse and body temperature only.
+# It returns false immediately when the pair is not plausible to avoid junk flags.
 
 def is_at_risk_rule(bpm: float, temp: float) -> bool:
     """True if fixed BPM/temp thresholds fire (BPM <=59 or >=106, temp <=35.9 or >=37.5) — only when plausible."""
@@ -75,9 +80,15 @@ def is_at_risk_rule(bpm: float, temp: float) -> bool:
     return False
 
 
+# This wraps two numbers as one tiny table row the sklearn model understands.
+# Keeping names aligned avoids silent shape bugs during prediction calls.
+
 def _feature_row(bpm: float, temp: float) -> pd.DataFrame:
     return pd.DataFrame([{"bpm": bpm, "temperature": temp}])
 
+
+# This asks the model for the risk chance and turns it into zero or one here.
+# If probabilities are missing it falls back to a plain class guess safely.
 
 def _ml_risk_proba_and_label(model: Any, bpm: float, temp: float) -> tuple[float, int]:
     """P(class=1), and binary label from deployed threshold."""
@@ -92,6 +103,9 @@ def _ml_risk_proba_and_label(model: Any, bpm: float, temp: float) -> tuple[float
     ml_label = 1 if p_risk >= cutoff else 0
     return p_risk, ml_label
 
+
+# This merges fixed-threshold hints with the ML vote for one final story.
+# Implausible pairs yield no final label even though ML numbers still exist.
 
 def combined_at_risk(
     bpm: float, temp: float, model: Any
@@ -111,5 +125,5 @@ def combined_at_risk(
         return None, rule, ml_label, p_risk
 
     # Plausible: decision = ML probability vs tuned threshold from model_threshold.json
-    final = 1 if ml_label == 1 else 0
+    final = ml_label
     return final, rule, ml_label, p_risk
