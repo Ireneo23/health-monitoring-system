@@ -1,7 +1,7 @@
 {
-  "ml_at_risk_proba_threshold": 0.45,
-  "training_rows": 150,
+  "ml_at_risk_proba_threshold": 0.31,
+  "training_rows": 200,
   "target_column": "label_gt",
-  "oof_f1_at_threshold": 0.9811320754716981,
+  "oof_f1_at_threshold": 0.9671361502347418,
   "selected_model": "random_forest"
 }

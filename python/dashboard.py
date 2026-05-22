@@ -70,8 +70,25 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
     root = tk.Tk()
     root.title("Health monitor")
     root.geometry("420x560")
-    root.resizable(False, False)
+    root.minsize(420, 560)
     root.configure(bg="#C8E8EC")
+    root.state("zoomed")
+
+    is_fullscreen = False
+
+    def toggle_fullscreen(_event: object | None = None) -> None:
+        nonlocal is_fullscreen
+        is_fullscreen = not is_fullscreen
+        root.attributes("-fullscreen", is_fullscreen)
+
+    def exit_fullscreen(_event: object | None = None) -> None:
+        nonlocal is_fullscreen
+        if is_fullscreen:
+            is_fullscreen = False
+            root.attributes("-fullscreen", False)
+
+    root.bind("<F11>", toggle_fullscreen)
+    root.bind("<Escape>", exit_fullscreen)
 
     card_bg = "#E6F4F6"
     fg_dark = "#1a1a1a"
@@ -136,16 +153,16 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
     chart_outer = tk.Frame(card, bg=card_bg)
     chart_outer.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 16))
 
-    c_w = 360
-    c_h = CHART_H + 36
+    canvas_default_w = 360
+    canvas_default_h = CHART_H + 36
     cv = tk.Canvas(
         chart_outer,
-        width=c_w,
-        height=c_h,
+        width=canvas_default_w,
+        height=canvas_default_h,
         bg="#DCEEF0",
         highlightthickness=0,
     )
-    cv.pack()
+    cv.pack(fill=tk.BOTH, expand=True)
 
     out_q: queue.Queue[Payload] = queue.Queue(maxsize=4)
     stop = threading.Event()
@@ -218,8 +235,12 @@ def run_dashboard(port: str, baud: int, model: Any) -> None:
         trace_b.append(b_y)
 
         cv.delete("all")
-        w = c_w
-        h = c_h
+        w = cv.winfo_width()
+        h = cv.winfo_height()
+        if w <= 1:
+            w = canvas_default_w
+        if h <= 1:
+            h = canvas_default_h
         x_scrub = int(w * 0.7)
         hl_w = 44
         cv.create_rectangle(

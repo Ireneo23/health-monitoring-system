@@ -21,7 +21,6 @@ const int buzzer = 8;
 static unsigned long lastBuzzerMs = 0;
 static bool buzzerOn = false;
 
-/** Matches Python serial commands: "normal" / "at risk" (exact, lowercase). */
 static bool pythonAtRisk = false;
 
 void updateBuzzerFromPython()
@@ -118,15 +117,13 @@ void loop()
   if (now - lastLcdMs >= 250)
   {
     lastLcdMs = now;
-    // Row 0: HR + R/N from Python (buzzer follows same flag).
     lcd.setCursor(0, 0);
     lcd.print("HR:");
     lcd.print(bpm);
-    lcd.print("    "); // overwrite leftovers when digits shrink
+    lcd.print("    ");
     lcd.setCursor(14, 0);
     lcd.print(pythonAtRisk ? "R" : "N");
 
-    // Row 1: Temperature
     lcd.setCursor(0, 1);
     if (temp == DEVICE_DISCONNECTED_C)
     {
